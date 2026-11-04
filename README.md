@@ -20,5 +20,15 @@ AI agents that **find** bugs, **guard** against them with tests, and **heal** fa
 
 1. Install Node.js 20 or newer.
 2. Copy `.env.example` to `.env` and add your OpenAI API key.
-3. Run `npm install`.
+3. Run `npm install`, then `npx playwright install chromium`.
 4. Run `npm run demo` and open http://localhost:3000 to see the demo shop. Set `PORT` to use a different port.
+
+## Hunting for bugs
+
+Run `npm run swarm`. It starts the demo shop on port 3100 and sends every persona in `swarm/personas.js` to explore it in parallel. Each run writes to `runs/<time>/`:
+
+- `bugs.json` lists each reported bug and the exact steps that led to it.
+- `events.jsonl` logs every decision the agents made.
+- One screenshot per bug.
+
+Options: `--personas searcher,bulk-buyer` runs only some personas, `--steps 40` changes how many actions each persona takes (default 25), `--headed` shows the browser, and `--url http://...` tests an app that is already running.
