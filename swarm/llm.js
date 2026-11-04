@@ -5,9 +5,12 @@ if (existsSync(".env")) {
 }
 
 const apiKey = process.env.OPENAI_API_KEY;
-const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+export const models = {
+    explore: process.env.OPENAI_MODEL || "gpt-5.4-mini",
+    verify: process.env.OPENAI_VERIFY_MODEL || "gpt-5.5",
+};
 
-export async function chatJson(messages) {
+export async function chatJson(messages, { model = models.explore } = {}) {
     if (!apiKey || apiKey === "your-key-here") {
         throw new Error("OPENAI_API_KEY is not set. Copy .env.example to .env and add your key.");
     }
@@ -22,7 +25,6 @@ export async function chatJson(messages) {
             body: JSON.stringify({
                 model,
                 messages,
-                temperature: 0.7,
                 response_format: { type: "json_object" },
             }),
         });

@@ -1,5 +1,5 @@
 import path from "node:path";
-import { chatJson } from "./llm.js";
+import { chatJson, models } from "./llm.js";
 
 const HISTORY_LIMIT = 12;
 const MIN_TURNS_FRACTION = 0.6;
@@ -13,6 +13,7 @@ Reply with a JSON object:
   "action": "click" | "fill" | "report_bug" | "done",
   "ref": <element number, for click and fill>,
   "text": "<text to type, for fill>",
+  "submit": true | false (for fill: press Enter after typing),
   "bug": { "title": "...", "expected": "...", "actual": "..." }
 }
 
@@ -20,13 +21,20 @@ Rules:
 - Only report a bug that is visible on the page right now: wrong numbers, wrong items, missing results, error messages, or the app accepting something it should reject.
 - "expected" and "actual" must be different. If what you see is correct, it is not a bug.
 - Check the maths yourself. Do not assume the page is right.
-- Typing into a field does nothing on its own. Click the button that submits it, then look at the result before judging.
-- Do not report the same problem twice. Do not report missing features or design opinions.
+- Typing into a field does nothing on its own. Set "submit": true or click the button that submits it, then look at the result before judging.
+- Do not report the same problem twice. The same cause with different products or numbers is the same problem.
+- Do not report missing features or design opinions.
+- After reporting a bug, move on to a different part of the shop.
 - When you have tested one part of the shop, move on to another: search, adding and removing cart items, quantities, discount codes, checkout.
 - Use "done" only when you have tried every part of the shop.`;
 
-const VERIFY_PROMPT = `You check bug reports from automated testers. You get a bug report and the state of the page after its steps were replayed in a fresh browser.
-Decide whether the page clearly shows the reported problem. Reject the report if the page looks correct, if expected and actual mean the same thing, or if the report depends on something the steps never did.
+const VERIFY_PROMPT = `You check bug reports from automated testers. You get a bug report, the page as it first loaded, and the page after the report's steps were replayed in a fresh browser.
+Decide whether the page clearly shows the reported problem. Reject the report if:
+- the page looks correct, or expected and actual mean the same thing;
+- the report depends on something the steps never did (typing into a field submits nothing until its button is clicked);
+- it is a design opinion or missing feature, such as wanting more detailed messages or a button to be hidden;
+- the app rejected bad input with a clear message. An HTTP 400 with an explanation is correct behaviour, not a bug;
+- it assumes a product exists that appears neither before nor after the steps, or that a search should match synonyms.
 Reply with a JSON object: { "confirmed": true | false, "reason": "one short sentence" }`;
 
 export async function observe(page) {
@@ -102,6 +110,21 @@ function describe({ observation, changes, problems, history, reported, turnsLeft
     ].join("\n\n");
 }
 
+function trackRequests(page) {
+    let inFlight = 0;
+    page.on("request", () => inFlight++);
+    page.on("requestfinished", () => inFlight--);
+    page.on("requestfailed", () => inFlight--);
+
+    return async function settle() {
+        const deadline = Date.now() + 5000;
+        await page.waitForTimeout(100);
+        while (inFlight > 0 && Date.now() < deadline) {
+            await page.waitForTimeout(50);
+        }
+    };
+}
+
 function watchProblems(page) {
     const problems = [];
     page.on("console", (message) => {
@@ -118,14 +141,67 @@ function watchProblems(page) {
     return problems;
 }
 
-async function perform(page, step) {
+async function perform(page, step, settle) {
     const target = page.locator(step.locator);
     if (step.action === "click") {
         await target.click({ timeout: 5000 });
     } else {
         await target.fill(step.text, { timeout: 5000 });
+        if (step.submit) {
+            await target.press("Enter");
+        }
     }
-    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    await settle();
+}
+
+function narrate(step) {
+    if (step.action === "click") {
+        return `Clicked "${step.label}"`;
+    }
+    return `Typed "${step.text}" into "${step.label}"${step.submit ? " and pressed Enter" : " (not submitted)"}`;
+}
+
+const GROUP_PROMPT = `You merge duplicate bug reports. Two reports are duplicates when the same underlying fault causes them, even if they mention different products, numbers or steps.
+Different faults in the same area are separate bugs. For example, "invalid email accepted" and "crash on empty cart" are two groups, even though both are about checkout.
+You get a numbered list of confirmed reports. Reply with a JSON object:
+{ "groups": [ { "title": "short name for the underlying bug", "members": [<report numbers>] } ] }
+Every report number must appear in exactly one group.`;
+
+export async function groupBugs(bugs) {
+    if (bugs.length < 2) {
+        return bugs.map((bug) => ({ ...bug, duplicates: [] }));
+    }
+
+    const list = bugs.map((bug, index) => `${index}: ${bug.title}. Expected: ${bug.expected}. Actual: ${bug.actual}`).join("\n");
+    const { groups = [] } = await chatJson(
+        [
+            { role: "system", content: GROUP_PROMPT },
+            { role: "user", content: list },
+        ],
+        { model: models.verify },
+    );
+
+    const seen = new Set();
+    const unique = [];
+    for (const group of groups) {
+        const members = (group.members || []).filter((index) => bugs[index] && !seen.has(index));
+        if (!members.length) {
+            continue;
+        }
+        members.forEach((index) => seen.add(index));
+        const shortest = members.reduce((best, index) => (bugs[index].steps.length < bugs[best].steps.length ? index : best));
+        unique.push({
+            ...bugs[shortest],
+            title: group.title || bugs[shortest].title,
+            duplicates: members.filter((index) => index !== shortest).map((index) => bugs[index].id),
+        });
+    }
+    bugs.forEach((bug, index) => {
+        if (!seen.has(index)) {
+            unique.push({ ...bug, duplicates: [] });
+        }
+    });
+    return unique;
 }
 
 const sameMeaning = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
@@ -134,11 +210,13 @@ export async function verifyBug({ browser, baseUrl, bug }) {
     const context = await browser.newContext();
     const page = await context.newPage();
     const problems = watchProblems(page);
+    const settle = trackRequests(page);
 
     try {
         await page.goto(baseUrl, { waitUntil: "networkidle" });
+        const start = await observe(page);
         for (const step of bug.steps) {
-            await perform(page, step);
+            await perform(page, step, settle);
         }
         const observation = await observe(page);
         const verdict = await chatJson([
@@ -149,12 +227,13 @@ export async function verifyBug({ browser, baseUrl, bug }) {
                     `Bug report: ${bug.title}`,
                     `Expected: ${bug.expected}`,
                     `Actual: ${bug.actual}`,
-                    `Steps replayed:\n${bug.steps.map((step) => (step.action === "fill" ? `Typed "${step.text}" into "${step.label}"` : `Clicked "${step.label}"`)).join("\n")}`,
+                    `Steps replayed:\n${bug.steps.map(narrate).join("\n")}`,
+                    `Page text before the steps:\n${start.text}`,
                     `Page text now:\n${observation.text}`,
                     `Errors during replay:\n${problems.length ? problems.join("\n") : "none"}`,
                 ].join("\n\n"),
             },
-        ]);
+        ], { model: models.verify });
         return { confirmed: verdict.confirmed === true, reason: verdict.reason };
     } catch (error) {
         return { confirmed: false, reason: `Replay failed: ${error.message.split("\n")[0]}` };
@@ -167,6 +246,7 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
     const context = await browser.newContext();
     const page = await context.newPage();
     const problems = watchProblems(page);
+    const settle = trackRequests(page);
 
     const steps = [];
     const history = [];
@@ -233,12 +313,13 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
             const step = { action: decision.action, locator: element.locator, label: element.label };
             if (decision.action === "fill") {
                 step.text = String(decision.text ?? "");
+                step.submit = decision.submit === true;
             }
 
             try {
-                await perform(page, step);
+                await perform(page, step, settle);
                 steps.push(step);
-                history.push(step.action === "fill" ? `Typed "${step.text}" into "${step.label}"` : `Clicked "${step.label}"`);
+                history.push(narrate(step));
             } catch (error) {
                 history.push(`Could not ${step.action} "${step.label}": ${error.message.split("\n")[0]}`);
             }

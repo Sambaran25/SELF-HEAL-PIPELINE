@@ -25,9 +25,11 @@ AI agents that **find** bugs, **guard** against them with tests, and **heal** fa
 
 ## Hunting for bugs
 
-Run `npm run swarm`. It starts the demo shop on port 3100 and sends every persona in `swarm/personas.js` to explore it in parallel. Each run writes to `runs/<time>/`:
+Run `npm run swarm`. It starts the demo shop on port 3100 and sends every persona in `swarm/personas.js` to explore it in parallel. When they finish, every report is replayed in a fresh browser and checked by a stronger model, and duplicates are merged. `OPENAI_MODEL` picks the exploring model and `OPENAI_VERIFY_MODEL` picks the checking model.
 
-- `bugs.json` lists each reported bug and the exact steps that led to it.
+Each run writes to `runs/<time>/`:
+
+- `bugs.json` lists each confirmed, unique bug with the shortest steps that reproduce it, plus the rejected reports and why they were rejected.
 - `events.jsonl` logs every decision the agents made.
 - One screenshot per bug.
 

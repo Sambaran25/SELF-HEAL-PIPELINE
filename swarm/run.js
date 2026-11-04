@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright";
-import { runPersona, verifyBug } from "./agent.js";
+import { groupBugs, runPersona, verifyBug } from "./agent.js";
 import { personas } from "./personas.js";
 
 const { values: args } = parseArgs({
@@ -93,15 +93,17 @@ try {
             return { ...bug, verification: verdict.reason, confirmed: verdict.confirmed };
         }),
     );
-    const bugs = verdicts.filter((bug) => bug.confirmed);
+    const confirmed = verdicts.filter((bug) => bug.confirmed);
     const rejected = verdicts.filter((bug) => !bug.confirmed);
+    const bugs = await groupBugs(confirmed);
 
     writeFileSync(path.join(runDir, "bugs.json"), `${JSON.stringify({ runId, baseUrl, bugs, rejected }, null, 4)}\n`);
-    emit({ type: "run-finished", runId, bugs: bugs.length, rejected: rejected.length });
+    emit({ type: "run-finished", runId, bugs: bugs.length, confirmed: confirmed.length, rejected: rejected.length });
 
-    console.log(`\n${bugs.length} confirmed bug(s), ${rejected.length} rejected. Saved to ${path.join(runDir, "bugs.json")}`);
+    console.log(`\n${confirmed.length} confirmed, ${rejected.length} rejected, ${bugs.length} unique bug(s). Saved to ${path.join(runDir, "bugs.json")}`);
     for (const bug of bugs) {
-        console.log(`- [${bug.persona}] ${bug.title}`);
+        const extra = bug.duplicates.length ? ` (+${bug.duplicates.length} duplicate reports)` : "";
+        console.log(`- ${bug.title}: ${bug.steps.length} step(s)${extra}`);
     }
 } finally {
     await browser.close();
