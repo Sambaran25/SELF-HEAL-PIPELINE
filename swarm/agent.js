@@ -2,10 +2,11 @@ import path from "node:path";
 import { chatJson } from "./llm.js";
 
 const HISTORY_LIMIT = 12;
+const MIN_TURNS_FRACTION = 0.6;
 
 const SYSTEM_PROMPT = `You are testing a web shop by acting as a real user. Your job is to find bugs.
 
-Each turn you get the visible page text, a numbered list of elements you can use, and any errors seen since your last action.
+Each turn you get the visible page text, what changed after your last action, a numbered list of elements you can use, and any errors seen since your last action.
 Reply with a JSON object:
 {
   "thought": "one short sentence about what you are checking",
@@ -16,12 +17,19 @@ Reply with a JSON object:
 }
 
 Rules:
-- Only report a bug you have seen with your own eyes on this page: wrong numbers, wrong items, missing results, error messages, or the app accepting something it should reject.
+- Only report a bug that is visible on the page right now: wrong numbers, wrong items, missing results, error messages, or the app accepting something it should reject.
+- "expected" and "actual" must be different. If what you see is correct, it is not a bug.
 - Check the maths yourself. Do not assume the page is right.
+- Typing into a field does nothing on its own. Click the button that submits it, then look at the result before judging.
 - Do not report the same problem twice. Do not report missing features or design opinions.
-- Use "done" when you have nothing useful left to try.`;
+- When you have tested one part of the shop, move on to another: search, adding and removing cart items, quantities, discount codes, checkout.
+- Use "done" only when you have tried every part of the shop.`;
 
-async function observe(page) {
+const VERIFY_PROMPT = `You check bug reports from automated testers. You get a bug report and the state of the page after its steps were replayed in a fresh browser.
+Decide whether the page clearly shows the reported problem. Reject the report if the page looks correct, if expected and actual mean the same thing, or if the report depends on something the steps never did.
+Reply with a JSON object: { "confirmed": true | false, "reason": "one short sentence" }`;
+
+export async function observe(page) {
     return page.evaluate(() => {
         const locatorFor = (element) => {
             const parts = [];
@@ -60,7 +68,22 @@ async function observe(page) {
     });
 }
 
-function describe(observation, problems, history, reported) {
+function textChanges(before, after) {
+    if (!before) {
+        return "first look at the page";
+    }
+    const lines = (text) => text.split("\n").map((line) => line.trim()).filter(Boolean);
+    const oldLines = new Set(lines(before));
+    const newLines = new Set(lines(after));
+    const added = [...newLines].filter((line) => !oldLines.has(line));
+    const removed = [...oldLines].filter((line) => !newLines.has(line));
+    if (!added.length && !removed.length) {
+        return "nothing changed";
+    }
+    return [...added.map((line) => `+ ${line}`), ...removed.map((line) => `- ${line}`)].join("\n");
+}
+
+function describe({ observation, changes, problems, history, reported, turnsLeft }) {
     const elements = observation.elements
         .map((element, index) => {
             const value = element.value !== undefined ? ` (current value: "${element.value}")` : "";
@@ -70,17 +93,16 @@ function describe(observation, problems, history, reported) {
 
     return [
         `Page text:\n${observation.text}`,
+        `What changed after your last action:\n${changes}`,
         `Elements:\n${elements}`,
         `Errors since your last action:\n${problems.length ? problems.join("\n") : "none"}`,
         `Your recent actions:\n${history.length ? history.slice(-HISTORY_LIMIT).join("\n") : "none yet"}`,
         `Bugs you already reported:\n${reported.length ? reported.map((bug) => `- ${bug.title}`).join("\n") : "none"}`,
+        `Actions left: ${turnsLeft}`,
     ].join("\n\n");
 }
 
-export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, emit }) {
-    const context = await browser.newContext();
-    const page = await context.newPage();
-
+function watchProblems(page) {
     const problems = [];
     page.on("console", (message) => {
         if (message.type() === "error") {
@@ -93,10 +115,63 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
             problems.push(`HTTP ${response.status()} from ${response.request().method()} ${new URL(response.url()).pathname}`);
         }
     });
+    return problems;
+}
+
+async function perform(page, step) {
+    const target = page.locator(step.locator);
+    if (step.action === "click") {
+        await target.click({ timeout: 5000 });
+    } else {
+        await target.fill(step.text, { timeout: 5000 });
+    }
+    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+}
+
+const sameMeaning = (a, b) => String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+
+export async function verifyBug({ browser, baseUrl, bug }) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const problems = watchProblems(page);
+
+    try {
+        await page.goto(baseUrl, { waitUntil: "networkidle" });
+        for (const step of bug.steps) {
+            await perform(page, step);
+        }
+        const observation = await observe(page);
+        const verdict = await chatJson([
+            { role: "system", content: VERIFY_PROMPT },
+            {
+                role: "user",
+                content: [
+                    `Bug report: ${bug.title}`,
+                    `Expected: ${bug.expected}`,
+                    `Actual: ${bug.actual}`,
+                    `Steps replayed:\n${bug.steps.map((step) => (step.action === "fill" ? `Typed "${step.text}" into "${step.label}"` : `Clicked "${step.label}"`)).join("\n")}`,
+                    `Page text now:\n${observation.text}`,
+                    `Errors during replay:\n${problems.length ? problems.join("\n") : "none"}`,
+                ].join("\n\n"),
+            },
+        ]);
+        return { confirmed: verdict.confirmed === true, reason: verdict.reason };
+    } catch (error) {
+        return { confirmed: false, reason: `Replay failed: ${error.message.split("\n")[0]}` };
+    } finally {
+        await context.close();
+    }
+}
+
+export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, emit }) {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    const problems = watchProblems(page);
 
     const steps = [];
     const history = [];
     const bugs = [];
+    let previousText = null;
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
     emit({ type: "persona-started", persona: persona.id });
@@ -104,7 +179,15 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
     try {
         for (let turn = 1; turn <= maxSteps; turn++) {
             const observation = await observe(page);
-            const prompt = describe(observation, problems.splice(0), history, bugs);
+            const prompt = describe({
+                observation,
+                changes: textChanges(previousText, observation.text),
+                problems: problems.splice(0),
+                history,
+                reported: bugs,
+                turnsLeft: maxSteps - turn + 1,
+            });
+            previousText = observation.text;
 
             const decision = await chatJson([
                 { role: "system", content: `${SYSTEM_PROMPT}\n\nWho you are: ${persona.description}` },
@@ -113,10 +196,18 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
             emit({ type: "decision", persona: persona.id, turn, thought: decision.thought, action: decision.action });
 
             if (decision.action === "done") {
-                break;
+                if (turn >= maxSteps * MIN_TURNS_FRACTION) {
+                    break;
+                }
+                history.push("Tried to stop early. There is still time: test a part of the shop you have not tried yet.");
+                continue;
             }
 
             if (decision.action === "report_bug" && decision.bug?.title) {
+                if (sameMeaning(decision.bug.expected, decision.bug.actual)) {
+                    history.push(`Report "${decision.bug.title}" was rejected: expected and actual are the same, so it is not a bug.`);
+                    continue;
+                }
                 const bug = {
                     id: `${persona.id}-${bugs.length + 1}`,
                     persona: persona.id,
@@ -129,7 +220,7 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
                 await page.screenshot({ path: path.join(runDir, bug.screenshot), fullPage: true });
                 bugs.push(bug);
                 history.push(`Reported bug: ${bug.title}`);
-                emit({ type: "bug-found", persona: persona.id, bug });
+                emit({ type: "bug-reported", persona: persona.id, bug });
                 continue;
             }
 
@@ -145,13 +236,7 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
             }
 
             try {
-                const target = page.locator(element.locator);
-                if (step.action === "click") {
-                    await target.click({ timeout: 5000 });
-                } else {
-                    await target.fill(step.text, { timeout: 5000 });
-                }
-                await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+                await perform(page, step);
                 steps.push(step);
                 history.push(step.action === "fill" ? `Typed "${step.text}" into "${step.label}"` : `Clicked "${step.label}"`);
             } catch (error) {

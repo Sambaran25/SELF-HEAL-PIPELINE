@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright";
-import { runPersona } from "./agent.js";
+import { runPersona, verifyBug } from "./agent.js";
 import { personas } from "./personas.js";
 
 const { values: args } = parseArgs({
@@ -62,8 +62,10 @@ function emit(event) {
 
     if (event.type === "decision") {
         console.log(`[${event.persona}] ${event.turn}. ${event.action}: ${event.thought}`);
-    } else if (event.type === "bug-found") {
-        console.log(`[${event.persona}] BUG: ${event.bug.title}`);
+    } else if (event.type === "bug-reported") {
+        console.log(`[${event.persona}] reported: ${event.bug.title}`);
+    } else if (event.type === "bug-verified") {
+        console.log(`[verify] ${event.confirmed ? "CONFIRMED" : "rejected"} ${event.bugId}: ${event.reason}`);
     } else if (event.type === "persona-error") {
         console.error(`[${event.persona}] stopped: ${event.error}`);
     }
@@ -81,12 +83,23 @@ try {
             runPersona({ browser, baseUrl, persona, maxSteps: Number(args.steps), runDir, emit }),
         ),
     );
-    const bugs = results.flat();
+    const reports = results.flat();
 
-    writeFileSync(path.join(runDir, "bugs.json"), `${JSON.stringify({ runId, baseUrl, bugs }, null, 4)}\n`);
-    emit({ type: "run-finished", runId, bugs: bugs.length });
+    console.log(`\nReplaying ${reports.length} report(s) in a fresh browser to confirm them...`);
+    const verdicts = await Promise.all(
+        reports.map(async (bug) => {
+            const verdict = await verifyBug({ browser, baseUrl, bug });
+            emit({ type: "bug-verified", bugId: bug.id, ...verdict });
+            return { ...bug, verification: verdict.reason, confirmed: verdict.confirmed };
+        }),
+    );
+    const bugs = verdicts.filter((bug) => bug.confirmed);
+    const rejected = verdicts.filter((bug) => !bug.confirmed);
 
-    console.log(`\n${bugs.length} bug report(s) saved to ${path.join(runDir, "bugs.json")}`);
+    writeFileSync(path.join(runDir, "bugs.json"), `${JSON.stringify({ runId, baseUrl, bugs, rejected }, null, 4)}\n`);
+    emit({ type: "run-finished", runId, bugs: bugs.length, rejected: rejected.length });
+
+    console.log(`\n${bugs.length} confirmed bug(s), ${rejected.length} rejected. Saved to ${path.join(runDir, "bugs.json")}`);
     for (const bug of bugs) {
         console.log(`- [${bug.persona}] ${bug.title}`);
     }
