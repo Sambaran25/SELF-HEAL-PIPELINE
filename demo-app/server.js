@@ -1,0 +1,56 @@
+import express from "express";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { products } from "./products.js";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const app = express();
+const port = Number(process.env.PORT) || 3000;
+
+app.use(express.json());
+app.use(express.static(path.join(here, "public")));
+
+app.get("/api/health", (req, res) => {
+    res.json({ ok: true });
+});
+
+app.get("/api/products", (req, res) => {
+    const query = String(req.query.q || "").trim();
+    const results = query ? products.filter((p) => p.name.includes(query)) : products;
+    res.json(results);
+});
+
+app.post("/api/checkout", (req, res) => {
+    const { name, email, items, discountPercent = 0 } = req.body || {};
+
+    if (!name || !email) {
+        return res.status(400).json({ error: "Name and email are required." });
+    }
+
+    const firstItem = products.find((p) => p.id === items[0].id);
+
+    let subtotal = 0;
+    for (const item of items) {
+        const product = products.find((p) => p.id === item.id);
+        if (!product) {
+            return res.status(400).json({ error: `Unknown product ${item.id}.` });
+        }
+        subtotal += product.price * item.quantity;
+    }
+
+    const total = Math.max(0, subtotal * (1 - discountPercent / 100));
+    res.json({
+        orderId: `ORD-${Date.now()}`,
+        firstItem: firstItem.name,
+        total: Number(total.toFixed(2)),
+    });
+});
+
+app.use((err, req, res, next) => {
+    console.error(err);
+    res.status(500).json({ error: "Something went wrong." });
+});
+
+app.listen(port, () => {
+    console.log(`Demo shop running at http://localhost:${port}`);
+});

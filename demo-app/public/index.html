@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Demo Shop</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>Demo Shop</h1>
+        <form id="search-form" data-testid="search-form">
+            <input id="search-input" data-testid="search-input" type="search" placeholder="Search products" aria-label="Search products">
+            <button type="submit" data-testid="search-button">Search</button>
+        </form>
+    </header>
+
+    <main>
+        <section aria-labelledby="products-heading">
+            <h2 id="products-heading">Products</h2>
+            <p id="no-results" data-testid="no-results" hidden>No products found.</p>
+            <ul id="product-list" data-testid="product-list"></ul>
+        </section>
+
+        <aside aria-labelledby="cart-heading">
+            <h2 id="cart-heading">Cart</h2>
+            <p id="cart-empty" data-testid="cart-empty">Your cart is empty.</p>
+            <ul id="cart-list" data-testid="cart-list"></ul>
+
+            <form id="discount-form" data-testid="discount-form">
+                <input id="discount-input" data-testid="discount-input" placeholder="Discount code" aria-label="Discount code">
+                <button type="submit" data-testid="discount-button">Apply</button>
+            </form>
+            <p id="discount-message" data-testid="discount-message" role="status"></p>
+
+            <p class="total">Total: <span id="cart-total" data-testid="cart-total">$0.00</span></p>
+
+            <form id="checkout-form" data-testid="checkout-form">
+                <h3>Checkout</h3>
+                <label>Name <input id="checkout-name" data-testid="checkout-name" name="name"></label>
+                <label>Email <input id="checkout-email" data-testid="checkout-email" name="email"></label>
+                <button type="submit" data-testid="checkout-button">Place order</button>
+            </form>
+            <p id="checkout-message" data-testid="checkout-message" role="status"></p>
+        </aside>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
