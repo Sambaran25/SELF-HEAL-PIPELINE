@@ -19,38 +19,24 @@ app.get("/api/products", async (req, res) => {
     if (query) {
         await new Promise((resolve) => setTimeout(resolve, Math.random() * 600));
     }
-    const normalizedQuery = query.toLowerCase();
-    const results = normalizedQuery ? products.filter((p) => p.name.toLowerCase().includes(normalizedQuery)) : products;
+    const results = query ? products.filter((p) => p.name.includes(query)) : products;
     res.json(results);
 });
 
 app.post("/api/checkout", (req, res) => {
-    const { name, email, items = [], discountPercent = 0 } = req.body || {};
+    const { name, email, items, discountPercent = 0 } = req.body || {};
 
     if (!name || !email) {
         return res.status(400).json({ error: "Name and email are required." });
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        return res.status(400).json({ error: "Enter a valid email address." });
-    }
+    const firstItem = products.find((p) => p.id === items[0].id);
 
-    if (!Array.isArray(items)) {
-        return res.status(400).json({ error: "Cart items are invalid." });
-    }
-
-    let firstItem = null;
     let subtotal = 0;
     for (const item of items) {
         const product = products.find((p) => p.id === item.id);
         if (!product) {
             return res.status(400).json({ error: `Unknown product ${item.id}.` });
-        }
-        if (!Number.isInteger(item.quantity) || item.quantity < 1) {
-            return res.status(400).json({ error: "Cart item quantities are invalid." });
-        }
-        if (!firstItem) {
-            firstItem = product;
         }
         subtotal += product.price * item.quantity;
     }
@@ -58,7 +44,7 @@ app.post("/api/checkout", (req, res) => {
     const total = Math.max(0, subtotal * (1 - discountPercent / 100));
     res.json({
         orderId: `ORD-${Date.now()}`,
-        firstItem: firstItem ? firstItem.name : null,
+        firstItem: firstItem.name,
         total: Number(total.toFixed(2)),
     });
 });
