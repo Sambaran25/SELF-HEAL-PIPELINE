@@ -68,7 +68,7 @@ function removeFromCart(index) {
 }
 
 function cartSubtotal() {
-    return cart.reduce((sum, line) => sum + line.price, 0);
+    return cart.reduce((sum, line) => sum + line.price * line.quantity, 0);
 }
 
 function renderCart() {
@@ -108,7 +108,12 @@ document.getElementById("discount-form").addEventListener("submit", (event) => {
         return;
     }
 
-    discountPercent += percent;
+    if (cart.length === 0) {
+        setMessage(discountMessage, "Add items to your cart before applying a discount.", "error");
+        return;
+    }
+
+    discountPercent = percent;
     setMessage(discountMessage, `Code ${code} applied: ${percent}% off.`, "success");
     renderCart();
 });
@@ -116,12 +121,30 @@ document.getElementById("discount-form").addEventListener("submit", (event) => {
 document.getElementById("checkout-form").addEventListener("submit", async (event) => {
     event.preventDefault();
 
+    const name = document.getElementById("checkout-name").value.trim();
+    const email = document.getElementById("checkout-email").value.trim();
+
+    if (!name || !email) {
+        setMessage(checkoutMessage, "Name and email are required.", "error");
+        return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setMessage(checkoutMessage, "Enter a valid email address.", "error");
+        return;
+    }
+
+    if (cart.length === 0) {
+        setMessage(checkoutMessage, "Add at least one item to your cart before checking out.", "error");
+        return;
+    }
+
     const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            name: document.getElementById("checkout-name").value.trim(),
-            email: document.getElementById("checkout-email").value.trim(),
+            name,
+            email,
             items: cart.map((line) => ({ id: line.id, quantity: line.quantity })),
             discountPercent,
         }),

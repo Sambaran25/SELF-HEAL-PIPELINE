@@ -19,7 +19,8 @@ app.get("/api/products", async (req, res) => {
     if (query) {
         await new Promise((resolve) => setTimeout(resolve, Math.random() * 600));
     }
-    const results = query ? products.filter((p) => p.name.includes(query)) : products;
+    const normalizedQuery = query.toLowerCase();
+    const results = query ? products.filter((p) => p.name.toLowerCase().includes(normalizedQuery)) : products;
     res.json(results);
 });
 
@@ -28,6 +29,14 @@ app.post("/api/checkout", (req, res) => {
 
     if (!name || !email) {
         return res.status(400).json({ error: "Name and email are required." });
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return res.status(400).json({ error: "Enter a valid email address." });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Add at least one item to your cart before checking out." });
     }
 
     const firstItem = products.find((p) => p.id === items[0].id);
