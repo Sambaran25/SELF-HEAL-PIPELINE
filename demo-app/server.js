@@ -14,8 +14,11 @@ app.get("/api/health", (req, res) => {
     res.json({ ok: true });
 });
 
-app.get("/api/products", (req, res) => {
+app.get("/api/products", async (req, res) => {
     const query = String(req.query.q || "").trim();
+    if (query) {
+        await new Promise((resolve) => setTimeout(resolve, Math.random() * 600));
+    }
     const results = query ? products.filter((p) => p.name.includes(query)) : products;
     res.json(results);
 });

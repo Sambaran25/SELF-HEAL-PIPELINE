@@ -12,6 +12,7 @@ export default defineConfig({
     use: {
         baseURL: `http://localhost:${port}`,
         trace: "retain-on-failure",
+        actionTimeout: 5000,
     },
     webServer: {
         command: "node demo-app/server.js",
