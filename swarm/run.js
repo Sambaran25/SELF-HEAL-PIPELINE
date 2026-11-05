@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { chromium } from "playwright";
+import { startDemoApp } from "../demo-app/start.js";
 import { groupBugs, runPersona, verifyBug } from "./agent.js";
 import { personas } from "./personas.js";
 
@@ -16,27 +16,6 @@ const { values: args } = parseArgs({
 });
 
 const DEMO_PORT = 3100;
-
-async function startDemoApp() {
-    const server = spawn(process.execPath, ["demo-app/server.js"], {
-        env: { ...process.env, PORT: String(DEMO_PORT) },
-        stdio: "ignore",
-    });
-    const baseUrl = `http://localhost:${DEMO_PORT}`;
-
-    for (let attempt = 0; attempt < 50; attempt++) {
-        try {
-            if ((await fetch(`${baseUrl}/api/health`)).ok) {
-                return { server, baseUrl };
-            }
-        } catch {
-            // Not listening yet.
-        }
-        await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    server.kill();
-    throw new Error("The demo app did not start.");
-}
 
 function pickPersonas() {
     if (!args.personas) {
@@ -71,7 +50,7 @@ function emit(event) {
     }
 }
 
-const demo = args.url ? null : await startDemoApp();
+const demo = args.url ? null : await startDemoApp(DEMO_PORT);
 const baseUrl = args.url || demo.baseUrl;
 const browser = await chromium.launch({ headless: !args.headed });
 

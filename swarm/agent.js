@@ -110,7 +110,7 @@ function describe({ observation, changes, problems, history, reported, turnsLeft
     ].join("\n\n");
 }
 
-function trackRequests(page) {
+export function trackRequests(page) {
     let inFlight = 0;
     page.on("request", () => inFlight++);
     page.on("requestfinished", () => inFlight--);
@@ -141,7 +141,7 @@ function watchProblems(page) {
     return problems;
 }
 
-async function perform(page, step, settle) {
+export async function perform(page, step, settle) {
     const target = page.locator(step.locator);
     if (step.action === "click") {
         await target.click({ timeout: 5000 });
@@ -154,7 +154,7 @@ async function perform(page, step, settle) {
     await settle();
 }
 
-function narrate(step) {
+export function narrate(step) {
     if (step.action === "click") {
         return `Clicked "${step.label}"`;
     }
