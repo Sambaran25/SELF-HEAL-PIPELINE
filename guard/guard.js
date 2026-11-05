@@ -204,8 +204,17 @@ export function checkFailsOnBug(testFile, reportFile, { repeat = 2 } = {}) {
 }
 
 export async function shrinkSteps({ browser, baseUrl, file, reportFile, bug, steps, title, assertions, signature }) {
-    const pageAfter = async (candidate) => JSON.stringify(await snapshotAfter({ browser, baseUrl, steps: candidate })).replace(/\d{6,}/g, "#");
+    const pageAfter = async (candidate) => {
+        try {
+            return JSON.stringify(await snapshotAfter({ browser, baseUrl, steps: candidate })).replace(/\d{6,}/g, "#");
+        } catch {
+            return null;
+        }
+    };
     const target = await pageAfter(steps);
+    if (target === null) {
+        return steps;
+    }
     let kept = [...steps];
     for (let index = kept.length - 1; index >= 0; index--) {
         const candidate = kept.filter((_, position) => position !== index);
