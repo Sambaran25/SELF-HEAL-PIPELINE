@@ -5,6 +5,7 @@ let discountPercent = 0;
 
 const productList = document.getElementById("product-list");
 const noResults = document.getElementById("no-results");
+const searching = document.getElementById("searching");
 const cartList = document.getElementById("cart-list");
 const cartEmpty = document.getElementById("cart-empty");
 const cartTotal = document.getElementById("cart-total");
@@ -21,8 +22,12 @@ function setMessage(element, text, kind) {
 }
 
 async function loadProducts(query = "") {
+    productList.innerHTML = "";
+    noResults.hidden = true;
+    searching.hidden = false;
     const response = await fetch(`/api/products?q=${encodeURIComponent(query)}`);
     const products = await response.json();
+    searching.hidden = true;
     renderProducts(products);
 }
 
