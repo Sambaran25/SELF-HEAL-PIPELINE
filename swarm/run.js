@@ -80,10 +80,11 @@ try {
     emit({ type: "run-finished", runId, bugs: bugs.length, confirmed: confirmed.length, rejected: rejected.length });
 
     console.log(`\n${confirmed.length} confirmed, ${rejected.length} rejected, ${bugs.length} unique bug(s). Saved to ${path.join(runDir, "bugs.json")}`);
-    for (const bug of bugs) {
+    for (const [index, bug] of bugs.entries()) {
         const extra = bug.duplicates.length ? ` (+${bug.duplicates.length} duplicate reports)` : "";
-        console.log(`- ${bug.title}: ${bug.steps.length} step(s)${extra}`);
+        console.log(`${index + 1}. ${bug.title}: ${bug.steps.length} step(s)${extra}`);
     }
+    console.log("\nTo leave bugs out of Guard, pass their numbers: npm run guard -- --pr --skip 2,5");
 } finally {
     await browser.close();
     demo?.server.kill();

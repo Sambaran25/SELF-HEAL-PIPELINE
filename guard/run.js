@@ -10,6 +10,7 @@ const { values: args } = parseArgs({
     options: {
         bugs: { type: "string" },
         pr: { type: "boolean", default: false },
+        skip: { type: "string", default: "" },
     },
 });
 
@@ -70,7 +71,17 @@ const { runId, bugs } = JSON.parse(readFileSync(bugsFile, "utf8"));
 
 const previous = existsSync(guardFile) ? JSON.parse(readFileSync(guardFile, "utf8")).outcomes : [];
 const alreadyGuarded = previous.filter((outcome) => outcome.accepted && existsSync(outcome.file));
-const dismissed = previous.filter((outcome) => outcome.dismissed);
+const skipIds = args.skip
+    .split(",")
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .map((token) => (/^\d+$/.test(token) ? bugs[Number(token) - 1]?.id : token));
+const dismissed = [
+    ...previous.filter((outcome) => outcome.dismissed),
+    ...bugs
+        .filter((bug) => skipIds.includes(bug.id) && !previous.some((outcome) => outcome.bugId === bug.id && outcome.dismissed))
+        .map((bug) => ({ bugId: bug.id, bug, dismissed: true, reason: "Skipped in review." })),
+];
 const settled = [...alreadyGuarded, ...dismissed];
 const todo = bugs.filter((bug) => !settled.some((outcome) => outcome.bugId === bug.id));
 console.log(`Guarding ${todo.length} bug(s) from ${bugsFile} (${alreadyGuarded.length} already have a test, ${dismissed.length} dismissed in review)\n`);
