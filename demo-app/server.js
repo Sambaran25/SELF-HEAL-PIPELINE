@@ -19,7 +19,8 @@ app.get("/api/products", async (req, res) => {
     if (query) {
         await new Promise((resolve) => setTimeout(resolve, Math.random() * 600));
     }
-    const results = query ? products.filter((p) => p.name.includes(query)) : products;
+    const normalizedQuery = query.toLowerCase();
+    const results = query ? products.filter((p) => p.name.toLowerCase().includes(normalizedQuery)) : products;
     res.json(results);
 });
 
