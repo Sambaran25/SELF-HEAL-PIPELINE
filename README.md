@@ -71,7 +71,9 @@ The healer reruns every failing or flaky test 10 times, then decides what kind o
 
 Test fixes go to a `heal/<run>` branch with a pull request into the failing branch. A fix may not remove assertions, skip tests or rename them.
 
-App fixes for known bugs are pushed straight to the pull request that added the Guard tests, with a comment showing the diff, and CI is started again on that branch. Pushes made by GitHub Actions do not trigger CI by themselves, so the healer starts it with `gh workflow run`.
+App fixes for known bugs are pushed straight to the pull request that added the Guard tests, with a comment showing the diff, and CI runs again on that branch. A second model reviews each app fix and rejects changes to data, prices or copy. The healer never fixes on top of its own fix commit, so it cannot loop.
+
+Pushes made with GitHub's built-in token do not start pull request checks, so add a `HEAL_TOKEN` secret holding a fine-grained personal access token for this repository with read and write access to Contents, Pull requests, Issues and Actions. The healer then pushes as you and the pull request's checks run normally. Without it, the healer falls back to `gh workflow run`, which does not show on the pull request.
 
 Run it locally with `npm run heal` (add `--base <git ref>` to choose what the app's changes are compared with). Results go to `reports/heal.json`.
 

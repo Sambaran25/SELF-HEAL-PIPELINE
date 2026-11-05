@@ -97,7 +97,7 @@ try {
                 const reportFile = path.join(runDir, "guard-check.json");
                 const check = checkFailsOnBug(file, reportFile);
                 if (check.ok) {
-                    const shrunk = shrinkSteps({ file, reportFile, bug, steps, title, assertions, signature: check.signature });
+                    const shrunk = await shrinkSteps({ browser, baseUrl: demo.baseUrl, file, reportFile, bug, steps, title, assertions, signature: check.signature });
                     const final = checkFailsOnBug(file, reportFile);
                     if (!final.ok) {
                         writeFileSync(file, renderTest({ bug, steps, title, assertions }));

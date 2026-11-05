@@ -27,10 +27,17 @@ const BUG_FIX_PROMPT = `You fix bugs in a web app. Each bug comes with a Playwri
 You get the bug reports, the failing tests with their errors, and the app's complete source.
 Make the smallest correct change to the app so the tests pass. Fix the root cause for every user, not only for the inputs the tests use.
 Never special-case test values, never remove features, and keep the existing code style.
+Fix logic only. Never change product data, prices, stock, discount codes or copy to make a number come out right.
+A test may depend on several bugs at once. If a test only passes by changing data, its expectation is wrong: leave it out.
 Reply with a JSON object:
 { "fixes": [ { "test": "exact test title", "cause": "one sentence on the root cause, naming the file", "change": "one sentence on the fix" } ],
   "replacements": [ { "file": "path exactly as given", "from": "exact text that appears once in that file", "to": "replacement text" } ] }
 Leave a bug out of "fixes" if you cannot fix it safely.`;
+
+const REVIEW_PROMPT = `You review a code change that claims to fix reported bugs in a web app. The tests already pass with it.
+Approve only if every change fixes faulty logic in a way that is right for all users.
+Reject it if it changes product data, prices, stock, discount codes or copy, special-cases test inputs, hides errors, or removes behaviour.
+Reply with a JSON object: { "approved": true | false, "reason": "one sentence" }`;
 
 const BUG_FIX_ATTEMPTS = 3;
 
@@ -274,6 +281,17 @@ function bugFixRequest(bugs, sources, feedback) {
     return [`Bugs to fix:\n\n${bugText.join("\n\n")}`, `App source:\n\n${sourceText.join("\n\n")}`, feedback].filter(Boolean).join("\n\n");
 }
 
+async function reviewBugFix({ appDir, bugs }) {
+    const diff = execFileSync("git", ["diff", "--", appDir], { encoding: "utf8" }).slice(0, 8000);
+    return chatJson(
+        [
+            { role: "system", content: REVIEW_PROMPT },
+            { role: "user", content: `Bug reports:\n${bugs.map((bug) => `- ${bug.title}: ${bug.details}`).join("\n")}\n\nChange:\n${diff}` },
+        ],
+        { model: models.verify },
+    );
+}
+
 export async function fixBugs({ bugs, appDir, reportFile, allowedFailures, emit }) {
     const files = sourceFiles(appDir).map((file) => file.replaceAll("\\", "/"));
     const original = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
@@ -305,16 +323,20 @@ export async function fixBugs({ bugs, appDir, reportFile, allowedFailures, emit 
         }
         const failingNow = collectTests(runPlaywright([], { reportFile, repeat: 2, freshServer: true })).filter((test) => test.results.some(isFailure));
         const failingKeys = new Set(failingNow.map(testKey));
-        const broken = failingNow.filter((test) => !allowedFailures.has(testKey(test)));
+        const fixedKeys = new Set(fixes.map(testKey));
+        const broken = failingNow.filter((test) => !allowedFailures.has(testKey(test)) || fixedKeys.has(testKey(test)));
         const nowPassing = remaining.filter((bug) => !failingKeys.has(testKey(bug)));
 
-        if (broken.length || !nowPassing.length) {
+        const review = broken.length || !nowPassing.length ? null : await reviewBugFix({ appDir, bugs: remaining });
+        if (broken.length || !nowPassing.length || !review.approved) {
             for (const [file, text] of sources) {
                 writeFileSync(file, text);
             }
             const why = broken.length
                 ? `it broke tests that passed before:\n${broken.map((test) => `${test.title}: ${test.results.find(isFailure).error.slice(0, 600)}`).join("\n")}`
-                : "none of the bug tests passed afterwards";
+                : review
+                  ? `a code review rejected it: ${review.reason}`
+                  : "none of the bug tests passed afterwards";
             feedback = `Your previous change was reverted because ${why}`;
             emit({ type: "bug-fix-attempt", attempt, accepted: false, reason: why.split("\n")[0] });
             continue;

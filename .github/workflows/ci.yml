@@ -21,6 +21,7 @@ jobs:
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
+          token: ${{ secrets.HEAL_TOKEN || github.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -41,7 +42,8 @@ jobs:
         continue-on-error: true
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.HEAL_TOKEN || github.token }}
+          PUSH_TRIGGERS_CI: ${{ secrets.HEAL_TOKEN != '' }}
         run: node healer/run.js --results reports/results.json --publish
 
       - name: Upload test report

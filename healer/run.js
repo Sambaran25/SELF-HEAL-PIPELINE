@@ -48,14 +48,19 @@ const LABELS = {
     "bug-fix": "Bug fixed in the app",
 };
 
+const BOT_NAME = "self-heal-bot";
+
 function commitAsBot(files, message) {
-    run("git", ["config", "user.name", "self-heal-bot"]);
+    run("git", ["config", "user.name", BOT_NAME]);
     run("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
     run("git", ["add", ...new Set(files)]);
     run("git", ["commit", "-m", message]);
 }
 
 function startCi(branch) {
+    if (process.env.PUSH_TRIGGERS_CI === "true") {
+        return;
+    }
     try {
         run("gh", ["workflow", "run", "ci.yml", "--ref", branch]);
     } catch (error) {
@@ -190,8 +195,11 @@ for (const test of failing) {
 }
 
 const knownBugs = outcomes.filter((outcome) => outcome.kind === "known-bug");
+const lastCommitIsOurs = run("git", ["log", "-1", "--format=%an"]) === BOT_NAME;
 let changedAppFiles = [];
-if (knownBugs.length) {
+if (knownBugs.length && lastCommitIsOurs) {
+    console.log("\nNot fixing known bugs again: the latest commit is already the healer's fix.");
+} else if (knownBugs.length) {
     console.log(`\nFixing ${knownBugs.length} known bug(s) in ${args.app}...`);
     const allowedFailures = new Set(outcomes.filter((outcome) => outcome.status !== "fixed").map((outcome) => `${path.normalize(outcome.file)}|${outcome.title}`));
     const result = await fixBugs({ bugs: knownBugs, appDir: args.app, reportFile, allowedFailures, emit });

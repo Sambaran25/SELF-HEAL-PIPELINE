@@ -203,10 +203,15 @@ export function checkFailsOnBug(testFile, reportFile, { repeat = 2 } = {}) {
     return { ok: true, failure: messages[0].split("\n").slice(0, 6).join("\n"), signature: [...signatures][0] };
 }
 
-export function shrinkSteps({ file, reportFile, bug, steps, title, assertions, signature }) {
+export async function shrinkSteps({ browser, baseUrl, file, reportFile, bug, steps, title, assertions, signature }) {
+    const pageAfter = async (candidate) => JSON.stringify(await snapshotAfter({ browser, baseUrl, steps: candidate })).replace(/\d{6,}/g, "#");
+    const target = await pageAfter(steps);
     let kept = [...steps];
     for (let index = kept.length - 1; index >= 0; index--) {
         const candidate = kept.filter((_, position) => position !== index);
+        if ((await pageAfter(candidate)) !== target) {
+            continue;
+        }
         writeFileSync(file, renderTest({ bug, steps: candidate, title, assertions }));
         const check = checkFailsOnBug(file, reportFile, { repeat: 1 });
         if (check.ok && check.signature === signature) {
