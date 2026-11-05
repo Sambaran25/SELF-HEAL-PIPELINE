@@ -76,8 +76,8 @@ const todo = bugs.filter((bug) => !settled.some((outcome) => outcome.bugId === b
 console.log(`Guarding ${todo.length} bug(s) from ${bugsFile} (${alreadyGuarded.length} already have a test, ${dismissed.length} dismissed in review)\n`);
 
 mkdirSync(TEST_DIR, { recursive: true });
-const demo = await startDemoApp(DEMO_PORT);
-const browser = await chromium.launch();
+const demo = todo.length ? await startDemoApp(DEMO_PORT) : null;
+const browser = todo.length ? await chromium.launch() : null;
 const outcomes = [...settled];
 
 try {
@@ -123,8 +123,8 @@ try {
         outcomes.push(outcome);
     }
 } finally {
-    await browser.close();
-    demo.server.kill();
+    await browser?.close();
+    demo?.server.kill();
     rmSync(path.join(runDir, "guard-check.json"), { force: true });
 }
 
