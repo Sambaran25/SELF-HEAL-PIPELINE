@@ -47,3 +47,11 @@ Run `npm run guard`. It reads the newest `runs/*/bugs.json` (or the file given w
 Results go to `guard.json` next to the bugs file. Running Guard again retries only the bugs that have no test yet. To drop a test for good, delete it and set `"dismissed": true` on its entry in `guard.json`. Add `--pr` to commit the new tests on a `guard/<run>` branch and open a pull request for review.
 
 Run the tests with `npm test`. They fail until their bugs are fixed.
+
+## CI
+
+`.github/workflows/ci.yml` runs the regression tests on every push to `main` and on every pull request. When a test fails, the run uploads a `playwright-report` artifact with the HTML report, a trace of each failed test, and `reports/results.json`.
+
+## CI
+
+`.github/workflows/ci.yml` runs the regression tests on every push to `main` and on every pull request. When a test fails, the run uploads a `playwright-report` artifact with the HTML report, a trace of each failed test, and `reports/results.json`.

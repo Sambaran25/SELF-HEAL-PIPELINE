@@ -6,9 +6,12 @@ export default defineConfig({
     testDir: "tests",
     timeout: 20000,
     expect: { timeout: 3000 },
-    reporter: process.env.CI ? "github" : "list",
+    reporter: process.env.CI
+        ? [["github"], ["html", { open: "never" }], ["json", { outputFile: "reports/results.json" }]]
+        : "list",
     use: {
         baseURL: `http://localhost:${port}`,
+        trace: "retain-on-failure",
     },
     webServer: {
         command: "node demo-app/server.js",

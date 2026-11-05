@@ -12,6 +12,7 @@ dist/
 # Test and agent output
 test-results/
 playwright-report/
+reports/
 runs/
 
 # Editor and OS files
