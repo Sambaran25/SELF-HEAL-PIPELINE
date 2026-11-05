@@ -1,6 +1,6 @@
-# SELF-HEAL-PIPELINE
+# Antibody
 
-AI agents that **find** bugs, **guard** against them with tests, and **heal** failing CI runs.
+An immune system for your app: AI agents that **find** bugs, **guard** against them with tests, and **heal** failing CI runs.
 
 1. **Find:** a swarm of AI "users" explores a web app with Playwright and records any bugs it finds.
 2. **Guard:** each bug becomes a Playwright regression test, added to CI through a pull request.
