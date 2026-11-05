@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Self-Heal Pipeline</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <div>
+            <h1>Self-Heal Pipeline</h1>
+            <p class="tagline">AI agents that find bugs, guard against them, and heal failing CI.</p>
+        </div>
+        <div class="controls">
+            <span id="mode" class="badge">Loading</span>
+            <label>Run <select id="run-select" aria-label="Swarm run"></select></label>
+            <label>Speed
+                <select id="speed" aria-label="Replay speed">
+                    <option value="5">5x</option>
+                    <option value="10" selected>10x</option>
+                    <option value="20">20x</option>
+                </select>
+            </label>
+            <button type="button" id="replay">Replay run</button>
+        </div>
+    </header>
+
+    <main>
+        <section aria-labelledby="find-heading">
+            <h2 id="find-heading"><span class="step">1</span> Find: AI shoppers explore the app</h2>
+            <div id="personas" class="personas"></div>
+
+            <div class="funnel" aria-label="Bug report funnel">
+                <div><span id="count-reported" class="number">0</span><span class="label">reports</span></div>
+                <div class="arrow" aria-hidden="true">→</div>
+                <div class="confirmed"><span id="count-confirmed" class="number">0</span><span class="label">confirmed by replay</span></div>
+                <div class="rejected"><span id="count-rejected" class="number">0</span><span class="label">rejected</span></div>
+                <div class="arrow" aria-hidden="true">→</div>
+                <div class="unique"><span id="count-unique" class="number">–</span><span class="label">unique bugs</span></div>
+            </div>
+
+            <div class="columns">
+                <div>
+                    <h3>Verifier verdicts</h3>
+                    <ul id="verdicts" class="feed"></ul>
+                </div>
+                <div>
+                    <h3>Unique bugs</h3>
+                    <ul id="bugs" class="feed"><li class="muted">Appears when the run finishes.</li></ul>
+                </div>
+            </div>
+        </section>
+
+        <section aria-labelledby="guard-heading">
+            <h2 id="guard-heading"><span class="step">2</span> Guard: every bug becomes a proven test</h2>
+            <ul id="guard" class="feed"><li class="muted">Run <code>npm run guard</code> to turn this run's bugs into tests.</li></ul>
+        </section>
+
+        <section aria-labelledby="heal-heading">
+            <h2 id="heal-heading"><span class="step">3</span> Heal: diagnose and fix failing tests</h2>
+            <table id="heal" aria-label="Healer results">
+                <thead><tr><th>Result</th><th>Diagnosis</th><th>Test</th><th>Details</th></tr></thead>
+                <tbody><tr><td colspan="4" class="muted">Run <code>npm run heal</code> to see the healer's verdicts.</td></tr></tbody>
+            </table>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>

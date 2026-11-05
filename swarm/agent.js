@@ -1,5 +1,18 @@
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { chatJson, models } from "./llm.js";
+
+async function saveLiveView(page, runDir, personaId) {
+    const dir = path.join(runDir, "live");
+    mkdirSync(dir, { recursive: true });
+    const target = path.join(dir, `${personaId}.jpg`);
+    try {
+        writeFileSync(`${target}.tmp`, await page.screenshot({ type: "jpeg", quality: 60 }));
+        renameSync(`${target}.tmp`, target);
+    } catch {
+        // The dashboard is reading the old image; the next action will refresh it.
+    }
+}
 
 const HISTORY_LIMIT = 12;
 const MIN_TURNS_FRACTION = 0.6;
@@ -254,6 +267,7 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
     let previousText = null;
 
     await page.goto(baseUrl, { waitUntil: "networkidle" });
+    await saveLiveView(page, runDir, persona.id);
     emit({ type: "persona-started", persona: persona.id });
 
     try {
@@ -320,6 +334,8 @@ export async function runPersona({ browser, baseUrl, persona, maxSteps, runDir, 
                 await perform(page, step, settle);
                 steps.push(step);
                 history.push(narrate(step));
+                await saveLiveView(page, runDir, persona.id);
+                emit({ type: "action", persona: persona.id, turn, step: narrate(step) });
             } catch (error) {
                 history.push(`Could not ${step.action} "${step.label}": ${error.message.split("\n")[0]}`);
             }

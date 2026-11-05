@@ -35,6 +35,10 @@ Each run writes to `runs/<time>/`:
 
 Options: `--personas searcher,bulk-buyer` runs only some personas, `--steps 40` changes how many actions each persona takes (default 25), `--headed` shows the browser, and `--url http://...` tests an app that is already running.
 
+## Dashboard
+
+Run `npm run dashboard` and open http://localhost:4000. It follows the newest swarm run live, with each persona's browser, the verifier's verdicts and the unique bugs, then shows Guard's tests and the healer's latest results. Pick an older run and press **Replay run** to play it back at 5 to 20 times speed.
+
 ## Turning bugs into tests
 
 Run `npm run guard`. It reads the newest `runs/*/bugs.json` (or the file given with `--bugs <path>`) and, for each bug:
