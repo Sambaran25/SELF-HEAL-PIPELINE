@@ -36,7 +36,8 @@ Leave a bug out of "fixes" if you cannot fix it safely.`;
 
 const REVIEW_PROMPT = `You review a code change that claims to fix reported bugs in a web app. The tests already pass with it.
 Approve only if every change fixes faulty logic in a way that is right for all users.
-Reject it if it changes product data, prices, stock, discount codes or copy, special-cases test inputs, hides errors, or removes behaviour.
+Reject it if it changes existing product data, prices, stock or discount codes, special-cases test inputs, hides errors, or removes behaviour.
+New validation or error messages are fine. Judge only whether the change is a correct fix, not whether a different design would be nicer.
 Reply with a JSON object: { "approved": true | false, "reason": "one sentence" }`;
 
 const BUG_FIX_ATTEMPTS = 3;
@@ -301,13 +302,19 @@ export async function fixBugs({ bugs, appDir, reportFile, allowedFailures, emit 
 
     for (let attempt = 1; attempt <= BUG_FIX_ATTEMPTS && remaining.length; attempt += 1) {
         const sources = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
-        const reply = await chatJson(
-            [
-                { role: "system", content: BUG_FIX_PROMPT },
-                { role: "user", content: bugFixRequest(remaining, sources, feedback) },
-            ],
-            { model: models.verify },
-        );
+        let reply;
+        try {
+            reply = await chatJson(
+                [
+                    { role: "system", content: BUG_FIX_PROMPT },
+                    { role: "user", content: bugFixRequest(remaining, sources, feedback) },
+                ],
+                { model: models.verify },
+            );
+        } catch (error) {
+            emit({ type: "bug-fix-attempt", attempt, accepted: false, reason: error.message.split("\n")[0] });
+            break;
+        }
         const replacements = reply.replacements || [];
         const { patched, problem } = replacements.length ? applyReplacements(sources, replacements) : { problem: "it proposed no changes" };
         if (problem) {
@@ -327,7 +334,10 @@ export async function fixBugs({ bugs, appDir, reportFile, allowedFailures, emit 
         const broken = failingNow.filter((test) => !allowedFailures.has(testKey(test)) || fixedKeys.has(testKey(test)));
         const nowPassing = remaining.filter((bug) => !failingKeys.has(testKey(bug)));
 
-        const review = broken.length || !nowPassing.length ? null : await reviewBugFix({ appDir, bugs: remaining });
+        const review =
+            broken.length || !nowPassing.length
+                ? null
+                : await reviewBugFix({ appDir, bugs: remaining }).catch((error) => ({ approved: false, failed: true, reason: error.message.split("\n")[0] }));
         if (broken.length || !nowPassing.length || !review.approved) {
             for (const [file, text] of sources) {
                 writeFileSync(file, text);
@@ -339,6 +349,9 @@ export async function fixBugs({ bugs, appDir, reportFile, allowedFailures, emit 
                   : "none of the bug tests passed afterwards";
             feedback = `Your previous change was reverted because ${why}`;
             emit({ type: "bug-fix-attempt", attempt, accepted: false, reason: why.split("\n")[0] });
+            if (review?.failed) {
+                break;
+            }
             continue;
         }
 
