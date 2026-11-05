@@ -12,7 +12,8 @@
         "swarm": "node swarm/run.js",
         "guard": "node guard/run.js",
         "test": "playwright test",
-        "heal": "node healer/run.js"
+        "heal": "node healer/run.js",
+        "scenario": "node scripts/demo-scenario.js"
     },
     "dependencies": {
         "express": "^5.3.0",

@@ -4,13 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
 
 jobs:
   regression-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -22,10 +32,20 @@ jobs:
       - run: npx playwright install --with-deps chromium
 
       - name: Run regression tests
+        id: tests
+        continue-on-error: true
         run: npx playwright test --pass-with-no-tests
 
+      - name: Heal failing tests
+        if: always() && !startsWith(github.head_ref || github.ref_name, 'heal/')
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: node healer/run.js --results reports/results.json --publish
+
       - name: Upload test report
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
@@ -34,3 +54,7 @@ jobs:
             reports/
             test-results/
           retention-days: 14
+
+      - name: Fail if tests failed
+        if: steps.tests.outcome == 'failure'
+        run: exit 1

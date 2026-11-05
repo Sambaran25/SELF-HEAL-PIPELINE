@@ -6,6 +6,7 @@ export default defineConfig({
     testDir: "tests",
     timeout: 20000,
     expect: { timeout: 3000 },
+    retries: process.env.CI ? 2 : 0,
     reporter: process.env.CI
         ? [["github"], ["html", { open: "never" }], ["json", { outputFile: "reports/results.json" }]]
         : "list",

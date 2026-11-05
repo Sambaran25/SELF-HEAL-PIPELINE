@@ -4,7 +4,7 @@ import path from "node:path";
 import { chatJson, models } from "../swarm/llm.js";
 import { collectTests, isFailure, runPlaywright } from "./playwright.js";
 
-const RERUNS = 5;
+const RERUNS = 10;
 const FLAKY_PROOF_RUNS = 8;
 
 const LOCATOR_PROMPT = `You repair Playwright tests whose locators broke because the app's markup changed.
@@ -55,7 +55,7 @@ function classifyError(message) {
     if (/element\(s\) not found|strict mode violation|resolved to 0 elements/.test(message)) {
         return "locator";
     }
-    if (/^Error: locator\.\w+: (Timeout|Test timeout)/m.test(message)) {
+    if (/^\w*Error: locator\.\w+: (Timeout|Test timeout)/m.test(message) && !/locator resolved to/.test(message)) {
         return "locator";
     }
     if (/^Error: expect\(/m.test(message)) {
