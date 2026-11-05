@@ -67,9 +67,11 @@ The healer reruns every failing or flaky test 10 times, then decides what kind o
 | Flaky test | Passes on some reruns | Rewrites the waiting logic, then requires 8 passes out of 8 |
 | Broken locator | "Element not found", every time | Maps the old test id to the new one using the app's code changes, then reruns |
 | Real regression | Fails on a value, every time | Leaves the test alone and explains the likely cause: a pull request comment, or an issue on `main` |
-| Known bug | A Guard test still failing on its assertion | Reports it only |
+| Known bug | A Guard test still failing on its assertion | Fixes the app code, then runs the whole suite twice: the bug tests must pass and nothing else may break |
 
-Fixes go to a `heal/<run>` branch with a pull request into the failing branch. A fix may not remove assertions, skip tests or rename them.
+Test fixes go to a `heal/<run>` branch with a pull request into the failing branch. A fix may not remove assertions, skip tests or rename them.
+
+App fixes for known bugs are pushed straight to the pull request that added the Guard tests, with a comment showing the diff, and CI is started again on that branch. Pushes made by GitHub Actions do not trigger CI by themselves, so the healer starts it with `gh workflow run`.
 
 Run it locally with `npm run heal` (add `--base <git ref>` to choose what the app's changes are compared with). Results go to `reports/heal.json`.
 
