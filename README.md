@@ -44,6 +44,6 @@ Run `npm run guard`. It reads the newest `runs/*/bugs.json` (or the file given w
 3. Runs the test against the current app. It is kept only if it fails twice in the same way on an assertion, so it really catches the bug.
 4. Removes every step the failure does not depend on.
 
-Results go to `guard.json` next to the bugs file. Running Guard again retries only the bugs that have no test yet. Add `--pr` to commit the new tests on a `guard/<run>` branch and open a pull request for review.
+Results go to `guard.json` next to the bugs file. Running Guard again retries only the bugs that have no test yet. To drop a test for good, delete it and set `"dismissed": true` on its entry in `guard.json`. Add `--pr` to commit the new tests on a `guard/<run>` branch and open a pull request for review.
 
 Run the tests with `npm test`. They fail until their bugs are fixed.

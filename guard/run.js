@@ -70,13 +70,15 @@ const { runId, bugs } = JSON.parse(readFileSync(bugsFile, "utf8"));
 
 const previous = existsSync(guardFile) ? JSON.parse(readFileSync(guardFile, "utf8")).outcomes : [];
 const alreadyGuarded = previous.filter((outcome) => outcome.accepted && existsSync(outcome.file));
-const todo = bugs.filter((bug) => !alreadyGuarded.some((outcome) => outcome.bugId === bug.id));
-console.log(`Guarding ${todo.length} bug(s) from ${bugsFile} (${alreadyGuarded.length} already have a test)\n`);
+const dismissed = previous.filter((outcome) => outcome.dismissed);
+const settled = [...alreadyGuarded, ...dismissed];
+const todo = bugs.filter((bug) => !settled.some((outcome) => outcome.bugId === bug.id));
+console.log(`Guarding ${todo.length} bug(s) from ${bugsFile} (${alreadyGuarded.length} already have a test, ${dismissed.length} dismissed in review)\n`);
 
 mkdirSync(TEST_DIR, { recursive: true });
 const demo = await startDemoApp(DEMO_PORT);
 const browser = await chromium.launch();
-const outcomes = [...alreadyGuarded];
+const outcomes = [...settled];
 
 try {
     for (const bug of todo) {
