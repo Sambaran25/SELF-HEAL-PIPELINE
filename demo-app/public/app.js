@@ -19,6 +19,7 @@ function formatPrice(amount) {
 function setMessage(element, text, kind) {
     element.textContent = text;
     element.className = kind;
+    element.hidden = !text;
 }
 
 async function loadProducts(query = "") {
@@ -68,12 +69,17 @@ function removeFromCart(index) {
 }
 
 function cartSubtotal() {
-    return cart.reduce((sum, line) => sum + line.price, 0);
+    return cart.reduce((sum, line) => sum + line.price * line.quantity, 0);
 }
 
 function renderCart() {
     cartList.innerHTML = "";
     cartEmpty.hidden = cart.length > 0;
+
+    if (cart.length === 0) {
+        discountPercent = 0;
+        setMessage(discountMessage, "", "");
+    }
 
     cart.forEach((line, index) => {
         const item = document.createElement("li");
@@ -108,7 +114,7 @@ document.getElementById("discount-form").addEventListener("submit", (event) => {
         return;
     }
 
-    discountPercent += percent;
+    discountPercent = percent;
     setMessage(discountMessage, `Code ${code} applied: ${percent}% off.`, "success");
     renderCart();
 });
