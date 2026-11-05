@@ -19,6 +19,6 @@ export default defineConfig({
         command: "node demo-app/server.js",
         url: `http://localhost:${port}/api/health`,
         env: { PORT: String(port) },
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: !process.env.CI && !process.env.FRESH_SERVER,
     },
 });

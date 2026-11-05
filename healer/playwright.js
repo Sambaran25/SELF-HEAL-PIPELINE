@@ -6,13 +6,18 @@ const CLI = path.join("node_modules", "@playwright", "test", "cli.js");
 
 export const stripAnsi = (text) => String(text ?? "").replace(/\u001b\[[0-9;]*m/g, "");
 
-export function runPlaywright(targets, { reportFile, repeat = 1 }) {
+export function runPlaywright(targets, { reportFile, repeat = 1, freshServer = false }) {
     rmSync(reportFile, { force: true });
     spawnSync(
         process.execPath,
         [CLI, "test", ...targets.map((target) => target.replaceAll("\\", "/")), "--reporter=json", `--repeat-each=${repeat}`, "--retries=0"],
         {
-            env: { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile, PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile },
+            env: {
+                ...process.env,
+                PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile,
+                PLAYWRIGHT_JSON_OUTPUT_NAME: reportFile,
+                ...(freshServer ? { FRESH_SERVER: "1" } : {}),
+            },
             encoding: "utf8",
         },
     );

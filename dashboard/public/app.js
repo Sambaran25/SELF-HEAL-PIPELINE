@@ -7,6 +7,7 @@ const HEAL_LABELS = {
     "broken-locator": "Broken locator",
     regression: "Real regression",
     "known-bug": "Known bug",
+    "bug-fix": "Bug fixed in the app",
 };
 
 let state;

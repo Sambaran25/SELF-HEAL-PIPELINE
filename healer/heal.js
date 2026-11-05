@@ -23,6 +23,17 @@ Reply with a JSON object: { "reason": "one sentence on the cause", "source": "th
 const REGRESSION_PROMPT = `A Playwright test fails every time with the same assertion error. Explain the most likely cause using the app's code changes.
 Reply with a JSON object: { "summary": "one sentence describing what broke for users", "likely_cause": "which change caused it, naming the file", "suggested_fix": "one sentence" }`;
 
+const BUG_FIX_PROMPT = `You fix bugs in a web app. Each bug comes with a Playwright test that reproduces it and fails today.
+You get the bug reports, the failing tests with their errors, and the app's complete source.
+Make the smallest correct change to the app so the tests pass. Fix the root cause for every user, not only for the inputs the tests use.
+Never special-case test values, never remove features, and keep the existing code style.
+Reply with a JSON object:
+{ "fixes": [ { "test": "exact test title", "cause": "one sentence on the root cause, naming the file", "change": "one sentence on the fix" } ],
+  "replacements": [ { "file": "path exactly as given", "from": "exact text that appears once in that file", "to": "replacement text" } ] }
+Leave a bug out of "fixes" if you cannot fix it safely.`;
+
+const BUG_FIX_ATTEMPTS = 3;
+
 function sourceFiles(dir) {
     return readdirSync(dir).flatMap((name) => {
         const full = path.join(dir, name);
@@ -224,9 +235,105 @@ export async function healTest({ test, context, reportFile, emit }) {
     const isKnownBug = test.annotations.some((annotation) => annotation.type === "bug");
     if (isKnownBug && errorKind === "assertion") {
         const bug = test.annotations.find((annotation) => annotation.type === "bug");
-        return { ...outcome, kind: "known-bug", status: "flagged", reason: "Guard test for a bug that is not fixed yet.", details: bug.description };
+        return {
+            ...outcome,
+            kind: "known-bug",
+            status: "flagged",
+            reason: "Guard test for a bug that is not fixed yet.",
+            details: bug.description,
+            error: firstError.split("\n").slice(0, 12).join("\n"),
+        };
     }
 
     const explanation = await explainRegression({ test, source, error: firstError, context });
     return { ...outcome, kind: "regression", status: "flagged", error: firstError.split("\n").slice(0, 8).join("\n"), ...explanation };
+}
+
+const testKey = (test) => `${path.normalize(test.file)}|${test.title}`;
+
+function applyReplacements(sources, replacements) {
+    const patched = new Map(sources);
+    for (const { file, from, to } of replacements) {
+        const name = String(file || "").replaceAll("\\", "/");
+        if (!patched.has(name)) {
+            return { problem: `${file} is not one of the app's source files` };
+        }
+        if (!from || patched.get(name).split(from).length !== 2) {
+            return { problem: `the text to replace does not appear exactly once in ${name}` };
+        }
+        patched.set(name, patched.get(name).replace(from, () => String(to ?? "")));
+    }
+    return { patched };
+}
+
+function bugFixRequest(bugs, sources, feedback) {
+    const bugText = bugs.map((bug) =>
+        [`### ${bug.title}`, `Bug report: ${bug.details}`, `Test ${bug.file}:\n${readFileSync(bug.file, "utf8")}`, `Error:\n${(bug.error || "").slice(0, 1500)}`].join("\n"),
+    );
+    const sourceText = [...sources].map(([file, text]) => `--- ${file}\n${text}`);
+    return [`Bugs to fix:\n\n${bugText.join("\n\n")}`, `App source:\n\n${sourceText.join("\n\n")}`, feedback].filter(Boolean).join("\n\n");
+}
+
+export async function fixBugs({ bugs, appDir, reportFile, allowedFailures, emit }) {
+    const files = sourceFiles(appDir).map((file) => file.replaceAll("\\", "/"));
+    const original = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
+    let remaining = [...bugs];
+    const fixes = [];
+    let feedback = "";
+
+    for (let attempt = 1; attempt <= BUG_FIX_ATTEMPTS && remaining.length; attempt += 1) {
+        const sources = new Map(files.map((file) => [file, readFileSync(file, "utf8")]));
+        const reply = await chatJson(
+            [
+                { role: "system", content: BUG_FIX_PROMPT },
+                { role: "user", content: bugFixRequest(remaining, sources, feedback) },
+            ],
+            { model: models.verify },
+        );
+        const replacements = reply.replacements || [];
+        const { patched, problem } = replacements.length ? applyReplacements(sources, replacements) : { problem: "it proposed no changes" };
+        if (problem) {
+            feedback = `Your previous answer was rejected because ${problem}. Try again.`;
+            emit({ type: "bug-fix-attempt", attempt, accepted: false, reason: problem });
+            continue;
+        }
+
+        for (const [file, text] of patched) {
+            if (text !== sources.get(file)) {
+                writeFileSync(file, text);
+            }
+        }
+        const failingNow = collectTests(runPlaywright([], { reportFile, repeat: 2, freshServer: true })).filter((test) => test.results.some(isFailure));
+        const failingKeys = new Set(failingNow.map(testKey));
+        const broken = failingNow.filter((test) => !allowedFailures.has(testKey(test)));
+        const nowPassing = remaining.filter((bug) => !failingKeys.has(testKey(bug)));
+
+        if (broken.length || !nowPassing.length) {
+            for (const [file, text] of sources) {
+                writeFileSync(file, text);
+            }
+            const why = broken.length
+                ? `it broke tests that passed before:\n${broken.map((test) => `${test.title}: ${test.results.find(isFailure).error.slice(0, 600)}`).join("\n")}`
+                : "none of the bug tests passed afterwards";
+            feedback = `Your previous change was reverted because ${why}`;
+            emit({ type: "bug-fix-attempt", attempt, accepted: false, reason: why.split("\n")[0] });
+            continue;
+        }
+
+        for (const bug of nowPassing) {
+            const explanation = (reply.fixes || []).find((fix) => fix.test === bug.title) || {};
+            fixes.push({ file: bug.file, title: bug.title, cause: explanation.cause || "", change: explanation.change || "" });
+        }
+        remaining = remaining.filter((bug) => failingKeys.has(testKey(bug)));
+        emit({ type: "bug-fix-attempt", attempt, accepted: true, fixed: nowPassing.length, remaining: remaining.length });
+        feedback = remaining.length
+            ? `Your change was kept. These tests still fail:\n${failingNow
+                  .filter((test) => remaining.some((bug) => testKey(bug) === testKey(test)))
+                  .map((test) => `${test.title}: ${test.results.find(isFailure).error.slice(0, 600)}`)
+                  .join("\n")}`
+            : "";
+    }
+
+    const changedFiles = files.filter((file) => readFileSync(file, "utf8") !== original.get(file));
+    return { fixes, changedFiles };
 }

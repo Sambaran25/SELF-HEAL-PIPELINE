@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { appContext, healTest } from "./heal.js";
+import { appContext, fixBugs, healTest } from "./heal.js";
 import { collectTests, isFailure, runPlaywright } from "./playwright.js";
 
 const { values: args } = parseArgs({
@@ -32,7 +32,12 @@ function pullRequestNumber() {
     if (!process.env.GITHUB_EVENT_PATH) {
         return null;
     }
-    return JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).pull_request?.number ?? null;
+    const fromEvent = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, "utf8")).pull_request?.number;
+    if (fromEvent) {
+        return fromEvent;
+    }
+    const open = JSON.parse(run("gh", ["pr", "list", "--head", currentBranch(), "--state", "open", "--json", "number"]));
+    return open[0]?.number ?? null;
 }
 
 const LABELS = {
@@ -40,7 +45,25 @@ const LABELS = {
     "broken-locator": "Broken locator",
     regression: "Real regression",
     "known-bug": "Known bug, not fixed yet",
+    "bug-fix": "Bug fixed in the app",
 };
+
+function commitAsBot(files, message) {
+    run("git", ["config", "user.name", "self-heal-bot"]);
+    run("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
+    run("git", ["add", ...new Set(files)]);
+    run("git", ["commit", "-m", message]);
+}
+
+function startCi(branch) {
+    try {
+        run("gh", ["workflow", "run", "ci.yml", "--ref", branch]);
+    } catch (error) {
+        console.log(`Could not start CI on ${branch}: ${error.message.split("\n")[0]}`);
+    }
+}
+
+const fixLine = (fix) => `- **${LABELS[fix.kind]}:** \`${fix.title}\`. ${fix.reason} ${fix.note || ""}`;
 
 function summaryMarkdown(outcomes, links) {
     const icon = { fixed: "✅", flagged: "🚩", unfixed: "⚠️" };
@@ -71,29 +94,44 @@ function regressionMarkdown(outcome) {
         .join("\n");
 }
 
-function publishFixes(fixes) {
+function pushBugFixes(fixes, files, number) {
+    const branch = currentBranch();
+    commitAsBot(files, `Fix ${fixes.length} bug(s) caught by the swarm`);
+    run("git", ["push", "origin", `HEAD:${branch}`]);
+    const diff = run("git", ["diff", "HEAD~1", "HEAD"]).slice(0, 6000);
+
+    const body = [
+        `## 🩹 The healer fixed ${fixes.length} bug(s) in the app`,
+        "",
+        "These tests failed every rerun because the bugs they guard against are real. The healer changed the app code, then ran the whole suite twice: the bug tests now pass and no other test broke.",
+        "",
+        ...fixes.map(fixLine),
+        "",
+        `<details><summary>Code change</summary>\n\n\`\`\`diff\n${diff}\n\`\`\`\n</details>`,
+        "",
+        "Please review the change before merging.",
+    ].join("\n");
+    run("gh", ["pr", "comment", String(number), "--body", body]);
+    startCi(branch);
+    return `Pushed ${fixes.length} bug fix(es) to pull request #${number}`;
+}
+
+function publishFixes(fixes, extraFiles = []) {
     const branch = currentBranch();
     const healBranch = `heal/${process.env.GITHUB_RUN_ID || Date.now()}`;
-    run("git", ["config", "user.name", "self-heal-bot"]);
-    run("git", ["config", "user.email", "41898282+github-actions[bot]@users.noreply.github.com"]);
     run("git", ["switch", "-c", healBranch]);
-    run("git", ["add", ...new Set(fixes.map((fix) => fix.file))]);
-    run("git", ["commit", "-m", `Heal ${fixes.length} failing test(s)`]);
+    commitAsBot([...fixes.filter((fix) => fix.kind !== "bug-fix").map((fix) => fix.file), ...extraFiles], `Heal ${fixes.length} failing test(s)`);
     run("git", ["push", "-u", "origin", healBranch]);
 
     const body = [
-        `The healer repaired ${fixes.length} test(s) that failed for reasons other than a real bug. Each fix was verified by rerunning the test before this pull request was opened.`,
+        `The healer repaired ${fixes.length} failing test(s). Each fix was verified by rerunning the tests before this pull request was opened.`,
         "",
-        ...fixes.map((fix) => `- **${LABELS[fix.kind]}:** \`${fix.title}\`. ${fix.reason} ${fix.note || ""}`),
+        ...fixes.map(fixLine),
         "",
         "The healer is not allowed to remove assertions, skip tests or rename them.",
     ].join("\n");
     const url = run("gh", ["pr", "create", "--base", branch, "--head", healBranch, "--title", `Heal ${fixes.length} failing test(s)`, "--body", body]);
-    try {
-        run("gh", ["workflow", "run", "ci.yml", "--ref", healBranch]);
-    } catch (error) {
-        console.log(`Could not start CI on ${healBranch}: ${error.message.split("\n")[0]}`);
-    }
+    startCi(healBranch);
     return url;
 }
 
@@ -151,12 +189,33 @@ for (const test of failing) {
     console.log(`  ${outcome.status}: ${LABELS[outcome.kind]}. ${outcome.reason || outcome.summary || ""}`);
 }
 
+const knownBugs = outcomes.filter((outcome) => outcome.kind === "known-bug");
+let changedAppFiles = [];
+if (knownBugs.length) {
+    console.log(`\nFixing ${knownBugs.length} known bug(s) in ${args.app}...`);
+    const allowedFailures = new Set(outcomes.filter((outcome) => outcome.status !== "fixed").map((outcome) => `${path.normalize(outcome.file)}|${outcome.title}`));
+    const result = await fixBugs({ bugs: knownBugs, appDir: args.app, reportFile, allowedFailures, emit });
+    changedAppFiles = result.changedFiles;
+    for (const fix of result.fixes) {
+        const outcome = outcomes.find((candidate) => candidate.file === fix.file && candidate.title === fix.title);
+        Object.assign(outcome, { kind: "bug-fix", status: "fixed", reason: fix.cause, note: fix.change });
+        emit({ type: "heal-outcome", ...outcome });
+        console.log(`  fixed: ${fix.title}. ${fix.cause} ${fix.change}`);
+    }
+}
+
 const links = [];
 if (args.publish) {
     const fixes = outcomes.filter((outcome) => outcome.status === "fixed");
     const regressions = outcomes.filter((outcome) => outcome.kind === "regression");
-    if (fixes.length) {
-        links.push(`Fix pull request: ${publishFixes(fixes)}`);
+    const bugFixes = fixes.filter((fix) => fix.kind === "bug-fix");
+    const number = pullRequestNumber();
+    if (bugFixes.length && number) {
+        links.push(pushBugFixes(bugFixes, changedAppFiles, number));
+    }
+    const forHealBranch = number ? fixes.filter((fix) => fix.kind !== "bug-fix") : fixes;
+    if (forHealBranch.length) {
+        links.push(`Fix pull request: ${publishFixes(forHealBranch, number ? [] : changedAppFiles)}`);
     }
     if (regressions.length) {
         links.push(publishRegressions(regressions));
