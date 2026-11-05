@@ -50,8 +50,29 @@ Run the tests with `npm test`. They fail until their bugs are fixed.
 
 ## CI
 
-`.github/workflows/ci.yml` runs the regression tests on every push to `main` and on every pull request. When a test fails, the run uploads a `playwright-report` artifact with the HTML report, a trace of each failed test, and `reports/results.json`.
+`.github/workflows/ci.yml` runs the tests on every push to `main` and on every pull request, retrying each failing test twice. It then runs the healer, uploads a `playwright-report` artifact (HTML report, traces and `reports/`), and fails the run if any test failed. The healer never turns a red run green.
 
-## CI
+CI needs an `OPENAI_API_KEY` repository secret, and **Settings → Actions → General → Allow GitHub Actions to create and approve pull requests** turned on.
 
-`.github/workflows/ci.yml` runs the regression tests on every push to `main` and on every pull request. When a test fails, the run uploads a `playwright-report` artifact with the HTML report, a trace of each failed test, and `reports/results.json`.
+## Healing failing tests
+
+The healer reruns every failing or flaky test 10 times, then decides what kind of failure it is:
+
+| Diagnosis | How it is detected | What the healer does |
+|---|---|---|
+| Flaky test | Passes on some reruns | Rewrites the waiting logic, then requires 8 passes out of 8 |
+| Broken locator | "Element not found", every time | Maps the old test id to the new one using the app's code changes, then reruns |
+| Real regression | Fails on a value, every time | Leaves the test alone and explains the likely cause: a pull request comment, or an issue on `main` |
+| Known bug | A Guard test still failing on its assertion | Reports it only |
+
+Fixes go to a `heal/<run>` branch with a pull request into the failing branch. A fix may not remove assertions, skip tests or rename them.
+
+Run it locally with `npm run heal` (add `--base <git ref>` to choose what the app's changes are compared with). Results go to `reports/heal.json`.
+
+### Demo scenarios
+
+`npm run scenario -- <name>` creates a branch, applies one change, pushes it and opens a pull request so CI and the healer run on it:
+
+- `locator`: renames the checkout button's test id. The healer should fix the test.
+- `flaky`: adds a search test that sleeps instead of waiting. The healer should fix the test.
+- `regression`: drops the cents from prices. The healer should flag it and leave the tests alone.
