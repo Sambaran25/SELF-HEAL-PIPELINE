@@ -7,6 +7,10 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 app.use(express.json());
 app.use(express.static(path.join(here, "public")));
 
@@ -19,7 +23,7 @@ app.get("/api/products", async (req, res) => {
     if (query) {
         await new Promise((resolve) => setTimeout(resolve, Math.random() * 600));
     }
-    const results = query ? products.filter((p) => p.name.includes(query)) : products;
+    const results = query ? products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())) : products;
     res.json(results);
 });
 
@@ -28,6 +32,10 @@ app.post("/api/checkout", (req, res) => {
 
     if (!name || !email) {
         return res.status(400).json({ error: "Name and email are required." });
+    }
+
+    if (!isValidEmail(email)) {
+        return res.status(400).json({ error: "Please enter a valid email address." });
     }
 
     const firstItem = products.find((p) => p.id === items[0].id);

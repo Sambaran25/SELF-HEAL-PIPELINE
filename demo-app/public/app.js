@@ -21,6 +21,10 @@ function setMessage(element, text, kind) {
     element.className = kind;
 }
 
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 async function loadProducts(query = "") {
     productList.innerHTML = "";
     noResults.hidden = true;
@@ -68,7 +72,7 @@ function removeFromCart(index) {
 }
 
 function cartSubtotal() {
-    return cart.reduce((sum, line) => sum + line.price, 0);
+    return cart.reduce((sum, line) => sum + line.price * line.quantity, 0);
 }
 
 function renderCart() {
@@ -108,7 +112,7 @@ document.getElementById("discount-form").addEventListener("submit", (event) => {
         return;
     }
 
-    discountPercent += percent;
+    discountPercent = percent;
     setMessage(discountMessage, `Code ${code} applied: ${percent}% off.`, "success");
     renderCart();
 });
@@ -116,12 +120,20 @@ document.getElementById("discount-form").addEventListener("submit", (event) => {
 document.getElementById("checkout-form").addEventListener("submit", async (event) => {
     event.preventDefault();
 
+    const name = document.getElementById("checkout-name").value.trim();
+    const email = document.getElementById("checkout-email").value.trim();
+
+    if (!isValidEmail(email)) {
+        setMessage(checkoutMessage, "Please enter a valid email address.", "error");
+        return;
+    }
+
     const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            name: document.getElementById("checkout-name").value.trim(),
-            email: document.getElementById("checkout-email").value.trim(),
+            name,
+            email,
             items: cart.map((line) => ({ id: line.id, quantity: line.quantity })),
             discountPercent,
         }),
