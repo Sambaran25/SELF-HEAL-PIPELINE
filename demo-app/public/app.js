@@ -68,7 +68,7 @@ function removeFromCart(index) {
 }
 
 function cartSubtotal() {
-    return cart.reduce((sum, line) => sum + line.price, 0);
+    return cart.reduce((sum, line) => sum + line.price * line.quantity, 0);
 }
 
 function renderCart() {
