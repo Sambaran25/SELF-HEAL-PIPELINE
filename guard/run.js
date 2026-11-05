@@ -84,6 +84,7 @@ try {
     for (const bug of todo) {
         console.log(`- ${bug.title}`);
         const outcome = { bugId: bug.id, bug };
+        let unfinished;
         try {
             const steps = await minimizeSteps({ browser, baseUrl: demo.baseUrl, bug });
             console.log(`    steps: ${bug.steps.length} -> ${steps.length}`);
@@ -93,6 +94,7 @@ try {
                 const { title, assertions } = await writeAssertions({ browser, baseUrl: demo.baseUrl, bug, steps, feedback });
                 const file = path.join(TEST_DIR, fileNameFor(title));
                 writeFileSync(file, renderTest({ bug, steps, title, assertions }));
+                unfinished = file;
 
                 const reportFile = path.join(runDir, "guard-check.json");
                 const check = checkFailsOnBug(file, reportFile);
@@ -105,10 +107,12 @@ try {
                     const kept = final.ok ? shrunk : steps;
                     Object.assign(outcome, { accepted: true, file, title, steps: kept.length, failure: (final.ok ? final : check).failure });
                     console.log(`    accepted with ${kept.length} step(s): ${file}`);
+                    unfinished = null;
                     break;
                 }
 
                 rmSync(file);
+                unfinished = null;
                 Object.assign(outcome, { accepted: false, reason: check.reason });
                 console.log(`    attempt ${attempt} rejected: ${check.reason.split("\n")[0]}`);
                 if (!check.retry) {
@@ -117,6 +121,9 @@ try {
                 feedback = `${check.reason} Your assertions were:\n${assertions.join("\n")}`;
             }
         } catch (error) {
+            if (unfinished) {
+                rmSync(unfinished, { force: true });
+            }
             Object.assign(outcome, { accepted: false, reason: error.message });
             console.log(`    skipped: ${error.message.split("\n")[0]}`);
         }
